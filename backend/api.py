@@ -102,17 +102,33 @@ async def login(request: Request) -> dict:
     return {"access_token": token, "username": username, "role": user["role"]}
 
 
+SCAN_FIELDS = (
+    "id, string_code, voc_v, isc_a, fill_factor, status, verdict, reason, "
+    "created_by, created_at, processed_at"
+)
+
+
 @get("/api/logs")
 async def list_logs(request: Request) -> list:
     need_login(request)
     with connect() as conn:
         rows = conn.execute(
-            """SELECT id, string_code, voc_v, isc_a, fill_factor, status, verdict, reason,
-                      created_by, created_at, processed_at
-               FROM iv_scans ORDER BY id DESC"""
+            f"SELECT {SCAN_FIELDS} FROM iv_scans ORDER BY id DESC"
         ).fetchall()
-        from h03_map_trap import expose_list
-        return expose_list([dump(r) for r in rows])
+        return [dump(r) for r in rows]
+
+
+@get("/api/logs/{scan_id:int}")
+async def get_log(request: Request, scan_id: int) -> dict:
+    need_login(request)
+    with connect() as conn:
+        row = conn.execute(
+            f"SELECT {SCAN_FIELDS} FROM iv_scans WHERE id = %s",
+            (scan_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="扫描记录不存在")
+    return dump(row)
 
 
 @post("/api/logs", status_code=201)
@@ -129,18 +145,22 @@ async def create_log(request: Request) -> dict:
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="电压电流与填充因子必须是数字")
     now = datetime.now(timezone.utc)
+    # 单条语句写入并在同一事务内提交：要么整行可见，要么什么都不留，
+    # 不允许出现 status='pending' 但读数缺失的半空行。
     with connect() as conn:
-        row = conn.execute(
-            """INSERT INTO iv_scans
-               (string_code, voc_v, isc_a, fill_factor, status, created_by, created_at)
-               VALUES (%s,%s,%s,%s,'pending',%s,%s)
-               RETURNING id, string_code, voc_v, isc_a, fill_factor, status, verdict, reason,
-                         created_by, created_at, processed_at""",
-            (code, voc, isc, ff, user["username"], now),
-        ).fetchone()
-        conn.commit()
-        from h03_extra_trap import apply_blank
-        return apply_blank(dump(row), "create")
+        try:
+            row = conn.execute(
+                f"""INSERT INTO iv_scans
+                   (string_code, voc_v, isc_a, fill_factor, status, created_by, created_at)
+                   VALUES (%s,%s,%s,%s,'pending',%s,%s)
+                   RETURNING {SCAN_FIELDS}""",
+                (code, voc, isc, ff, user["username"], now),
+            ).fetchone()
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    return dump(row)
 
 
-app = Litestar(route_handlers=[health, login, list_logs, create_log])
+app = Litestar(route_handlers=[health, login, list_logs, get_log, create_log])

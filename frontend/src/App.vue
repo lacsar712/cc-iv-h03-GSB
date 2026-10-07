@@ -27,7 +27,7 @@
       <section>
         <table>
           <thead>
-            <tr><th>编号</th><th>组串</th><th>Voc</th><th>Isc</th><th>FF</th><th>状态</th><th>结论</th></tr>
+            <tr><th>编号</th><th>组串</th><th>Voc</th><th>Isc</th><th>FF</th><th>状态</th><th>结论</th><th></th></tr>
           </thead>
           <tbody>
             <tr v-for="row in logs" :key="row.id">
@@ -35,12 +35,32 @@
               <td>{{ row.string_code }}</td>
               <td>{{ row.voc_v }}</td>
               <td>{{ row.isc_a }}</td>
-              <td><!-- h03-trap-blank -->{{ row.fill_factor === 0 || row.fill_factor == null ? '' : row.fill_factor }}</td>
+              <td>{{ formatFF(row.fill_factor) }}</td>
               <td><span class="tag" :class="row.status === 'pending' ? 'pending' : 'ok'">{{ row.status === 'pending' ? '待处理' : '已完成' }}</span></td>
               <td><span v-if="row.verdict" class="tag" :class="row.verdict === '合格' ? 'ok' : 'bad'">{{ row.verdict }}</span><span v-else>—</span></td>
+              <td><button class="secondary" @click="openDetail(row.id)">详情</button></td>
             </tr>
           </tbody>
         </table>
+      </section>
+      <section v-if="detail">
+        <h2>详情 #{{ detail.id }}</h2>
+        <p v-if="detailError" class="err">{{ detailError }}</p>
+        <table class="detail">
+          <tbody>
+            <tr><th>组串编号</th><td>{{ detail.string_code }}</td></tr>
+            <tr><th>开路电压 Voc (V)</th><td>{{ detail.voc_v }}</td></tr>
+            <tr><th>短路电流 Isc (A)</th><td>{{ detail.isc_a }}</td></tr>
+            <tr><th>填充因子 FF</th><td>{{ formatFF(detail.fill_factor) }}</td></tr>
+            <tr><th>状态</th><td>{{ detail.status === 'pending' ? '待处理' : '已完成' }}</td></tr>
+            <tr><th>结论</th><td>{{ detail.verdict || '—' }}</td></tr>
+            <tr><th>判定依据</th><td>{{ detail.reason || '—' }}</td></tr>
+            <tr><th>提交人</th><td>{{ detail.created_by }}</td></tr>
+            <tr><th>提交时间</th><td>{{ formatTime(detail.created_at) }}</td></tr>
+            <tr><th>处理时间</th><td>{{ formatTime(detail.processed_at) }}</td></tr>
+          </tbody>
+        </table>
+        <button class="secondary" @click="closeDetail">返回总表</button>
       </section>
     </div>
   </main>
@@ -49,6 +69,8 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 const session = ref(null);
 const logs = ref([]);
+const detail = ref(null);
+const detailError = ref("");
 const loginUser = ref("scanner");
 const loginPass = ref("scan123456");
 const stringCode = ref("");
@@ -61,6 +83,34 @@ let timer;
 const isWriter = computed(() => session.value?.role === "writer");
 function headers() {
   return session.value ? { Authorization: "Bearer " + session.value.token } : {};
+}
+// 忠实回显接口读数：0 就是 0，只有数据库里真正为 NULL 才显示 —。
+// 绝不在前端把缺失/0 统一洗白成空白。
+function formatFF(v) {
+  if (v === null || v === undefined || v === "") return "—";
+  return v;
+}
+function formatTime(v) {
+  if (!v) return "—";
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString("zh-CN", { hour12: false });
+}
+async function openDetail(id) {
+  detailError.value = "";
+  detail.value = null;
+  try {
+    const res = await fetch(`/api/logs/${id}`, { headers: headers() });
+    if (res.status === 401) { logout(); return; }
+    const data = await res.json();
+    if (!res.ok) { detailError.value = data.detail || "详情加载失败"; return; }
+    detail.value = data;
+  } catch {
+    detailError.value = "详情网络异常";
+  }
+}
+function closeDetail() {
+  detail.value = null;
+  detailError.value = "";
 }
 async function refresh() {
   if (!session.value) return;
