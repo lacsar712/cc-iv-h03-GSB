@@ -2,25 +2,25 @@ import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
+import bcrypt
 from jose import JWTError, jwt
 from litestar import Litestar, Request, get, post
 from litestar.exceptions import HTTPException
 from litestar.response import Response
 from litestar.status_codes import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
-from passlib.context import CryptContext
 
 from db import SCHEMA, connect
 from rules import judge
 
 SECRET = os.environ.get("JWT_SECRET", "pvivscan-dev-secret")
-pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 USERS = {
-    "scanner": {"role": "writer", "password_hash": pwd.hash("scan123456")},
-    "watcher": {"role": "reader", "password_hash": pwd.hash("watch123456")},
+    "scanner": {"role": "writer", "password_hash": bcrypt.hashpw(b"scan123456", bcrypt.gensalt())},
+    "watcher": {"role": "reader", "password_hash": bcrypt.hashpw(b"watch123456", bcrypt.gensalt())},
 }
 
 
 def dump(row):
+    """接口回包的唯一投影：总表格与详情卡都消费同一份字段，绝不抹掉 fill_factor。"""
     out = dict(row)
     for key, val in list(out.items()):
         if hasattr(val, "isoformat"):
@@ -93,7 +93,7 @@ async def login(request: Request) -> dict:
     username = (data.get("username") or "").strip()
     password = data.get("password") or ""
     user = USERS.get(username)
-    if not user or not pwd.verify(password, user["password_hash"]):
+    if not user or not bcrypt.checkpw(password.encode(), user["password_hash"]):
         raise HTTPException(status_code=HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
     exp = datetime.now(timezone.utc) + timedelta(hours=8)
     token = jwt.encode(
@@ -111,8 +111,7 @@ async def list_logs(request: Request) -> list:
                       created_by, created_at, processed_at
                FROM iv_scans ORDER BY id DESC"""
         ).fetchall()
-        from h03_map_trap import expose_list
-        return expose_list([dump(r) for r in rows])
+        return [dump(r) for r in rows]
 
 
 @post("/api/logs", status_code=201)
@@ -139,8 +138,7 @@ async def create_log(request: Request) -> dict:
             (code, voc, isc, ff, user["username"], now),
         ).fetchone()
         conn.commit()
-        from h03_extra_trap import apply_blank
-        return apply_blank(dump(row), "create")
+        return dump(row)
 
 
 app = Litestar(route_handlers=[health, login, list_logs, create_log])

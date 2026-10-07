@@ -30,17 +30,35 @@
             <tr><th>编号</th><th>组串</th><th>Voc</th><th>Isc</th><th>FF</th><th>状态</th><th>结论</th></tr>
           </thead>
           <tbody>
-            <tr v-for="row in logs" :key="row.id">
+            <tr v-for="row in logs" :key="row.id" :class="{ selected: selectedId === row.id }" @click="selectedId = row.id">
               <td>{{ row.id }}</td>
               <td>{{ row.string_code }}</td>
               <td>{{ row.voc_v }}</td>
               <td>{{ row.isc_a }}</td>
-              <td><!-- h03-trap-blank -->{{ row.fill_factor === 0 || row.fill_factor == null ? '' : row.fill_factor }}</td>
+              <td>{{ row.fill_factor }}</td>
               <td><span class="tag" :class="row.status === 'pending' ? 'pending' : 'ok'">{{ row.status === 'pending' ? '待处理' : '已完成' }}</span></td>
               <td><span v-if="row.verdict" class="tag" :class="row.verdict === '合格' ? 'ok' : 'bad'">{{ row.verdict }}</span><span v-else>—</span></td>
             </tr>
           </tbody>
         </table>
+        <p class="hint">点击任意一行，在下方详情卡查看完整读数。</p>
+      </section>
+      <section class="card">
+        <h2>详情卡</h2>
+        <p v-if="!detail" class="sub">尚未选择记录——点击上方表格中的一行查看详情。</p>
+        <dl v-else>
+          <dt>编号</dt><dd>{{ detail.id }}</dd>
+          <dt>组串编号</dt><dd>{{ detail.string_code }}</dd>
+          <dt>开路电压 Voc (V)</dt><dd>{{ detail.voc_v }}</dd>
+          <dt>短路电流 Isc (A)</dt><dd>{{ detail.isc_a }}</dd>
+          <dt>填充因子 FF</dt><dd class="ff">{{ detail.fill_factor }}</dd>
+          <dt>状态</dt><dd>{{ detail.status === 'pending' ? '待处理' : '已完成' }}</dd>
+          <dt>结论</dt><dd>{{ detail.verdict || '—' }}</dd>
+          <dt>判定理由</dt><dd>{{ detail.reason || '—' }}</dd>
+          <dt>提交人</dt><dd>{{ detail.created_by }}</dd>
+          <dt>提交时间</dt><dd>{{ detail.created_at }}</dd>
+          <dt>处理时间</dt><dd>{{ detail.processed_at || '—' }}</dd>
+        </dl>
       </section>
     </div>
   </main>
@@ -49,6 +67,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 const session = ref(null);
 const logs = ref([]);
+const selectedId = ref(null);
 const loginUser = ref("scanner");
 const loginPass = ref("scan123456");
 const stringCode = ref("");
@@ -59,6 +78,8 @@ const error = ref("");
 const loading = ref(false);
 let timer;
 const isWriter = computed(() => session.value?.role === "writer");
+// 详情卡永远取自总表同一份数据：轮询刷新后卡片同步更新，数值没有第二份副本可漂没。
+const detail = computed(() => logs.value.find((row) => row.id === selectedId.value) || null);
 function headers() {
   return session.value ? { Authorization: "Bearer " + session.value.token } : {};
 }
@@ -90,6 +111,7 @@ function logout() {
   if (timer) clearInterval(timer);
   session.value = null;
   logs.value = [];
+  selectedId.value = null;
   localStorage.removeItem("pv_session");
 }
 async function submit() {
@@ -138,6 +160,15 @@ button.secondary { background: #365314; }
 .err { color: #fecaca; }
 table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 th, td { text-align: left; padding: 0.45rem; border-bottom: 1px solid #166534; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: #166534; }
+tbody tr.selected { background: #15803d; }
+.hint { color: #a7f3d0; font-size: 0.8rem; margin: 0.5rem 0 0; }
+.card h2 { margin: 0 0 0.75rem; color: #86efac; font-size: 1.05rem; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1.25rem; margin: 0; }
+dt { color: #a7f3d0; font-size: 0.85rem; }
+dd { margin: 0; }
+dd.ff { font-weight: 700; color: #fde68a; }
 .tag { padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.8rem; }
 .ok { background: #14532d; color: #bbf7d0; }
 .bad { background: #7f1d1d; color: #fecaca; }
